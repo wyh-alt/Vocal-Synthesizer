@@ -29,10 +29,7 @@ from core.pipeline import GuideVocalPipeline, PipelineResult
 from ui.widgets import (
     BatchProgressPanel,
     DragLineEdit,
-    MidiQueueWidget,
-    STATUS_DONE,
-    STATUS_FAILED,
-    STATUS_RUNNING,
+    collect_midi_files,
     create_compact_combo,
 )
 
@@ -155,16 +152,21 @@ class GeneratePage(QWidget):
         io_card = CardWidget(container)
         io_layout = QVBoxLayout(io_card)
         io_layout.setSpacing(10)
-        io_layout.addWidget(StrongBodyLabel("MIDI 输入队列", io_card))
+        io_layout.addWidget(StrongBodyLabel("输入 / 输出", io_card))
 
-        self.queueWidget = MidiQueueWidget(io_card)
-        self.queueWidget.filesChanged.connect(self._on_queue_changed)
-        io_layout.addWidget(self.queueWidget)
+        in_row = QHBoxLayout()
+        self.inputEdit = DragLineEdit(io_card)
+        self.inputEdit.setPlaceholderText("将 MIDI 文件或文件夹拖到这里")
+        in_browse = PushButton("浏览...", io_card)
+        in_browse.clicked.connect(self._browse_input)
+        in_row.addWidget(self.inputEdit, 1)
+        in_row.addWidget(in_browse)
+        io_layout.addLayout(in_row)
 
         out_row = QHBoxLayout()
         self.outputDirEdit = DragLineEdit(io_card)
         self.outputDirEdit.setPlaceholderText("输出目录（留空则与 MIDI 同目录）")
-        out_browse = PushButton("选择输出目录", io_card)
+        out_browse = PushButton("浏览...", io_card)
         out_browse.clicked.connect(self._browse_output_dir)
         out_row.addWidget(self.outputDirEdit, 1)
         out_row.addWidget(out_browse)
@@ -236,10 +238,9 @@ class GeneratePage(QWidget):
         layout.addWidget(ds_card)
 
         self.progressPanel = BatchProgressPanel(container)
-        self.generateBtn = PrimaryPushButton(FIF.PLAY, "开始批量生成", container)
+        self.generateBtn = PrimaryPushButton(FIF.PLAY, "生成导唱", container)
         self.generateBtn.clicked.connect(self._generate)
         self.generateBtn.setMinimumHeight(40)
-        self.generateBtn.setEnabled(False)  # 队列空时禁用
 
         bottom_row = QHBoxLayout()
         bottom_row.setSpacing(12)
@@ -293,6 +294,17 @@ class GeneratePage(QWidget):
         self.config = self._collect_config()
         save_config(self.user_dir, self.config)
 
+    def _browse_input(self):
+        """按用户要求：仅打开目录选择器。要单个文件的话拖进来即可。"""
+        start = self.inputEdit.text().strip() or self.config.last_midi_dir or self.app_dir
+        if not os.path.isdir(start):
+            start = os.path.dirname(start) if os.path.isfile(start) else self.app_dir
+        path = QFileDialog.getExistingDirectory(self, "选择 MIDI 所在文件夹", start)
+        if path:
+            self.inputEdit.setText(path)
+            self.config = replace(self.config, last_midi_dir=path)
+            save_config(self.user_dir, self.config)
+
     def _browse_output_dir(self):
         start = self.outputDirEdit.text() or self.config.last_output_dir or self.app_dir
         path = QFileDialog.getExistingDirectory(self, "选择输出目录", start)
@@ -312,27 +324,42 @@ class GeneratePage(QWidget):
         if path:
             self.voicebankEdit.setText(path)
 
-    def _on_queue_changed(self, count: int):
-        self.generateBtn.setEnabled(count > 0 and self._worker is None)
-        if self._worker is None:
-            if count == 0:
-                self.progressPanel.set_progress(0, "就绪")
-            else:
-                self.progressPanel.set_progress(0, f"队列: {count} 个文件")
+    def _resolve_input_paths(self, raw: str) -> tuple[list[str], str]:
+        """把输入框文本解析为具体 MIDI 文件列表。
+        - 空 → 错误提示
+        - 单个 .mid/.midi 文件 → [该文件]
+        - 目录 → 递归收集其中所有 .mid/.midi
+        - 其他 → 报错
+        返回 (列表, 错误信息)，两者互斥。"""
+        raw = (raw or "").strip().strip('"').strip("'")
+        if not raw:
+            return [], "请先选择 MIDI 文件或包含 MIDI 的文件夹"
+        if not os.path.exists(raw):
+            return [], f"路径不存在: {raw}"
+        if os.path.isfile(raw):
+            if not raw.lower().endswith((".mid", ".midi")):
+                return [], "文件必须是 .mid 或 .midi"
+            return [os.path.abspath(raw)], ""
+        if os.path.isdir(raw):
+            files = collect_midi_files(raw)
+            if not files:
+                return [], f"该文件夹（含子目录）内未找到 .mid / .midi 文件"
+            return files, ""
+        return [], f"无法识别的路径: {raw}"
 
     def _generate(self):
-        paths = self.queueWidget.pending_paths()
-        if not paths:
+        paths, err = self._resolve_input_paths(self.inputEdit.text())
+        if err:
             InfoBar.warning(
-                "无待处理文件", "请先拖入或添加 MIDI 文件",
-                parent=self, position=InfoBarPosition.TOP,
+                "无法生成", err,
+                parent=self, position=InfoBarPosition.TOP, duration=4000,
             )
             return
 
         self._save_config()
-        self.queueWidget.reset_status()
         self.generateBtn.setEnabled(False)
         self._first_success_dir = ""
+        self._failed_items: list[tuple[str, str]] = []
 
         output_dir = self.outputDirEdit.text().strip()
         self.progressPanel.set_progress(1, f"开始批处理 {len(paths)} 个文件...")
@@ -350,34 +377,30 @@ class GeneratePage(QWidget):
         base = os.path.basename(midi_path)
         pct = int((index - 1) / max(1, total) * 100)
         self.progressPanel.set_progress(pct, f"[{index}/{total}] {base} —— 解析中")
-        self.queueWidget.set_status(midi_path, STATUS_RUNNING, "解析中")
 
     def _on_item_progress(self, midi_path: str, message: str):
         first_line = message.strip().splitlines()[0] if message else ""
-        if first_line:
-            self.queueWidget.set_status(midi_path, STATUS_RUNNING, first_line[:60])
-            base = os.path.basename(midi_path)
-            pct = int((self._current_index - 1) / max(1, self._current_total) * 100)
-            self.progressPanel.set_progress(
-                pct, f"[{self._current_index}/{self._current_total}] {base} —— {first_line[:60]}"
-            )
+        if not first_line:
+            return
+        base = os.path.basename(midi_path)
+        pct = int((self._current_index - 1) / max(1, self._current_total) * 100)
+        self.progressPanel.set_progress(
+            pct, f"[{self._current_index}/{self._current_total}] {base} —— {first_line[:60]}"
+        )
 
     def _on_item_finished(self, midi_path: str, result: PipelineResult):
         if result.success:
-            self.queueWidget.set_status(
-                midi_path, STATUS_DONE, os.path.basename(result.output_wav)
-            )
             if not self._first_success_dir:
                 self._first_success_dir = os.path.dirname(result.output_wav)
         else:
             first_line = (result.message or "失败").strip().splitlines()[0]
-            self.queueWidget.set_status(midi_path, STATUS_FAILED, first_line[:80])
+            self._failed_items.append((os.path.basename(midi_path), first_line[:200]))
 
     def _on_batch_finished(self, success: int, failed: int):
         self._worker = None
         total = success + failed
         self.progressPanel.set_progress(100, f"完成：成功 {success} / 失败 {failed}（共 {total}）")
-        self.generateBtn.setEnabled(self.queueWidget.pending_paths() != [])
+        self.generateBtn.setEnabled(True)
 
         if self._first_success_dir:
             self.progressPanel.openBtn.setEnabled(True)
@@ -395,15 +418,20 @@ class GeneratePage(QWidget):
                 parent=self, position=InfoBarPosition.TOP, duration=5000,
             )
         elif success > 0:
-            InfoBar.warning(
-                "部分完成", f"成功 {success}，失败 {failed}",
-                parent=self, position=InfoBarPosition.TOP, duration=6000,
-            )
+            self._show_failed_dialog(f"部分完成：成功 {success}，失败 {failed}")
         else:
-            InfoBar.error(
-                "全部失败", "请检查列表中每一项的错误信息",
-                parent=self, position=InfoBarPosition.TOP, duration=6000,
-            )
+            self._show_failed_dialog("全部失败")
+
+    def _show_failed_dialog(self, title: str):
+        if not self._failed_items:
+            return
+        lines = [f"• {name}\n    {msg}" for name, msg in self._failed_items[:20]]
+        if len(self._failed_items) > 20:
+            lines.append(f"...还有 {len(self._failed_items) - 20} 个")
+        box = MessageBox(title, "\n".join(lines), self)
+        box.yesButton.setText("确定")
+        box.cancelButton.hide()
+        box.exec()
 
 
 class HelpPage(QWidget):
