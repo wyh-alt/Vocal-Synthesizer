@@ -490,7 +490,8 @@ class MainWindow(FluentWindow):
         self.app_dir = app_dir
         self.user_dir = user_dir or app_dir
         self.setWindowTitle("MIDI 导唱生成 · Vocal Synthesizer v1.0")
-        self.resize(960, 620)
+        self.resize(900, 600)
+        self.setMinimumSize(900, 600)
 
         icon_path = os.path.join(app_dir, "icon.ico")
         if os.path.exists(icon_path):
