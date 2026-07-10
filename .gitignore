@@ -1,0 +1,52 @@
+# === 大文件资源（不推 Git，通过 Release 分发 exe 包）===
+Nishiren Diffsinger v2.0/
+Diffsinger.LIEE.Immortal.Idol.MM.2.8.JubiLIEE.2025.1.1/
+DiffSinger-2.5.1/
+
+# === 构建产物 ===
+build/
+dist/
+*.pyc
+*.pyo
+__pycache__/
+*.egg-info/
+.pyinstaller/
+*.spec.bak
+
+# === IDE / 编辑器 ===
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# === Python 虚拟环境 ===
+.venv/
+venv/
+env/
+ENV/
+
+# === 系统 ===
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# === 输出文件 / 样本 ===
+*.wav
+*.mp3
+*.flac
+!samples/*.wav
+36-*.mid
+867395-*.mid
+_icon.png
+
+# === 用户本地配置（保留仓库内的 config.json 作为模板）===
+config.local.json
+
+# === 临时文件 ===
+*.log
+*.tmp
+midi_guide_*/
+
+# === Claude Code 会话 ===
+.claude/

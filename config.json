@@ -1,0 +1,19 @@
+{
+  "engine": "onnx",
+  "voicebank_path": "C:/Users/Administrator/PycharmProjects/MIDI导唱生成/Nishiren Diffsinger v2.0",
+  "diffsinger_root": "C:/Users/Administrator/PycharmProjects/MIDI导唱生成/DiffSinger-2.5.1",
+  "variance_exp": "",
+  "acoustic_exp": "",
+  "speaker": "Standard",
+  "language": "auto",
+  "melody_track": "auto",
+  "diffusion_steps": 20,
+  "pitch_steps": 10,
+  "variance_steps": 10,
+  "shallow_depth": 0.6,
+  "seed": 42,
+  "velocity": 1.2,
+  "output_dir": "",
+  "last_midi_dir": "",
+  "last_output_dir": "C:/Users/Administrator/Desktop"
+}
