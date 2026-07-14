@@ -490,8 +490,8 @@ class MainWindow(FluentWindow):
         self.app_dir = app_dir
         self.user_dir = user_dir or app_dir
         self.setWindowTitle("MIDI 导唱生成 · Vocal Synthesizer v1.0")
-        self.resize(900, 600)
         self.setMinimumSize(900, 600)
+        self.resize(900, 600)
 
         icon_path = os.path.join(app_dir, "icon.ico")
         if os.path.exists(icon_path):
@@ -508,3 +508,12 @@ class MainWindow(FluentWindow):
         self.addSubInterface(
             self.helpPage, FIF.INFO, "说明", NavigationItemPosition.BOTTOM
         )
+
+    def showEvent(self, e):
+        """qframelesswindow 在 show() 期间会通过 native 消息触发一次
+        resize(500, 500)（其 __init__ 里 hardcode 的默认尺寸），且这个 resize
+        走的是 QWidget.setGeometry 路径，会绕过 minimumSize 约束。这里在
+        show 完成后强制 resize 回来，作为最终防线。"""
+        super().showEvent(e)
+        if self.width() < 900 or self.height() < 600:
+            self.resize(900, 600)
